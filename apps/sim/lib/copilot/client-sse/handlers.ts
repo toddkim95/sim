@@ -5,8 +5,8 @@ import {
   finalizeThinkingBlock,
 } from '@/lib/copilot/client-sse/content-blocks'
 import { STREAM_STORAGE_KEY } from '@/lib/copilot/constants'
+import type { LegacyStreamEvent as SSEEvent } from '@/lib/copilot/legacy-stream-events'
 import { asRecord } from '@/lib/copilot/orchestrator/sse/utils'
-import type { SSEEvent } from '@/lib/copilot/orchestrator/types'
 import {
   isBackgroundState,
   isRejectedState,
