@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createLogger } from '@sim/logger'
 import { useQueryClient } from '@tanstack/react-query'
 import { usePathname } from 'next/navigation'
-import {
-  cancelRunToolExecution,
-  executeRunToolOnClient,
-  markRunToolManuallyStopped,
-  reportManualRunToolStop,
-} from '@/lib/copilot/client-sse/run-tool-execution'
+import { toDisplayMessage } from '@/lib/copilot/chat/display-message'
+import type {
+  PersistedFileAttachment,
+  PersistedMessage,
+} from '@/lib/copilot/chat/persisted-message'
 import { COPILOT_CHAT_API_PATH, MOTHERSHIP_CHAT_API_PATH } from '@/lib/copilot/constants'
 import type { MothershipStreamV1EventEnvelope } from '@/lib/copilot/generated/mothership-stream-v1'
 import {
@@ -35,19 +34,17 @@ import {
   isResourceToolName,
 } from '@/lib/copilot/resources/extraction'
 import { VFS_DIR_TO_RESOURCE } from '@/lib/copilot/resources/types'
+import {
+  cancelRunToolExecution,
+  executeRunToolOnClient,
+  markRunToolManuallyStopped,
+  reportManualRunToolStop,
+} from '@/lib/copilot/tools/client/run-tool-execution'
 import { isWorkflowToolName } from '@/lib/copilot/tools/workflow-tools'
 import { getNextWorkflowColor } from '@/lib/workflows/colors'
 import { invalidateResourceQueries } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-registry'
 import { deploymentKeys } from '@/hooks/queries/deployments'
-import {
-  type TaskChatHistory,
-  type TaskStoredContentBlock,
-  type TaskStoredFileAttachment,
-  type TaskStoredMessage,
-  type TaskStoredToolCall,
-  taskKeys,
-  useChatHistory,
-} from '@/hooks/queries/tasks'
+import { type TaskChatHistory, taskKeys, useChatHistory } from '@/hooks/queries/tasks'
 import { getTopInsertionSortOrder } from '@/hooks/queries/utils/top-insertion-sort-order'
 import { workflowKeys } from '@/hooks/queries/workflows'
 import { useExecutionStream } from '@/hooks/use-execution-stream'
@@ -58,14 +55,11 @@ import { useTerminalConsoleStore } from '@/stores/terminal'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import type {
   ChatMessage,
-  ChatMessageAttachment,
   ContentBlock,
-  ContentBlockType,
   FileAttachmentForApi,
   MothershipResource,
   MothershipResourceType,
   QueuedMessage,
-  ToolCallStatus,
 } from '../types'
 
 export interface UseChatReturn {
@@ -93,14 +87,6 @@ export interface UseChatReturn {
   streamingFile: { fileName: string; content: string } | null
 }
 
-const STATE_TO_STATUS: Record<string, ToolCallStatus> = {
-  [MothershipStreamV1ToolOutcome.success]: 'success',
-  [MothershipStreamV1ToolOutcome.error]: 'error',
-  [MothershipStreamV1ToolOutcome.cancelled]: 'cancelled',
-  [MothershipStreamV1ToolOutcome.rejected]: 'error',
-  [MothershipStreamV1ToolOutcome.skipped]: 'success',
-} as const
-
 const DEPLOY_TOOL_NAMES: Set<string> = new Set([
   DeployApi.id,
   DeployChat.id,
@@ -109,109 +95,6 @@ const DEPLOY_TOOL_NAMES: Set<string> = new Set([
 ])
 const RECONNECT_TAIL_ERROR =
   'Live reconnect failed before the stream finished. The latest response may be incomplete.'
-
-function mapStoredBlock(block: TaskStoredContentBlock): ContentBlock {
-  const mapped: ContentBlock = {
-    type: block.type as ContentBlockType,
-    content: block.content,
-  }
-
-  if (block.type === 'tool_call' && block.toolCall) {
-    const resolvedStatus = STATE_TO_STATUS[block.toolCall.state ?? ''] ?? 'error'
-    mapped.toolCall = {
-      id: block.toolCall.id ?? '',
-      name: block.toolCall.name ?? 'unknown',
-      status: resolvedStatus,
-      displayTitle:
-        resolvedStatus === 'cancelled' ? 'Stopped by user' : block.toolCall.display?.text,
-      params: block.toolCall.params,
-      calledBy: block.toolCall.calledBy,
-      result: block.toolCall.result,
-    }
-  }
-
-  return mapped
-}
-
-function mapStoredToolCall(tc: TaskStoredToolCall): ContentBlock {
-  const resolvedStatus = (STATE_TO_STATUS[tc.status] ?? 'error') as ToolCallStatus
-  return {
-    type: 'tool_call',
-    toolCall: {
-      id: tc.id,
-      name: tc.name,
-      status: resolvedStatus,
-      displayTitle: resolvedStatus === 'cancelled' ? 'Stopped by user' : undefined,
-      params: tc.params,
-      result:
-        tc.result != null
-          ? {
-              success: tc.status === 'success',
-              output: tc.result,
-              error: tc.error,
-            }
-          : undefined,
-    },
-  }
-}
-
-function toDisplayAttachment(f: TaskStoredFileAttachment): ChatMessageAttachment {
-  return {
-    id: f.id,
-    filename: f.filename,
-    media_type: f.media_type,
-    size: f.size,
-    previewUrl: f.media_type.startsWith('image/')
-      ? `/api/files/serve/${encodeURIComponent(f.key)}?context=mothership`
-      : undefined,
-  }
-}
-
-function mapStoredMessage(msg: TaskStoredMessage): ChatMessage {
-  const mapped: ChatMessage = {
-    id: msg.id,
-    role: msg.role,
-    content: msg.content,
-    ...(msg.requestId ? { requestId: msg.requestId } : {}),
-  }
-
-  const hasContentBlocks = Array.isArray(msg.contentBlocks) && msg.contentBlocks.length > 0
-  const hasToolCalls = Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0
-  const contentBlocksHaveTools =
-    hasContentBlocks && msg.contentBlocks!.some((b) => b.type === 'tool_call')
-
-  if (hasContentBlocks && (!hasToolCalls || contentBlocksHaveTools)) {
-    const blocks = msg.contentBlocks!.map(mapStoredBlock)
-    const hasText = blocks.some((b) => b.type === 'text' && b.content?.trim())
-    if (!hasText && msg.content?.trim()) {
-      blocks.push({ type: 'text', content: msg.content })
-    }
-    mapped.contentBlocks = blocks
-  } else if (hasToolCalls) {
-    const blocks: ContentBlock[] = msg.toolCalls!.map(mapStoredToolCall)
-    if (msg.content?.trim()) {
-      blocks.push({ type: 'text', content: msg.content })
-    }
-    mapped.contentBlocks = blocks
-  }
-
-  if (Array.isArray(msg.fileAttachments) && msg.fileAttachments.length > 0) {
-    mapped.attachments = msg.fileAttachments.map(toDisplayAttachment)
-  }
-
-  if (Array.isArray(msg.contexts) && msg.contexts.length > 0) {
-    mapped.contexts = msg.contexts.map((c) => ({
-      kind: c.kind,
-      label: c.label,
-      ...(c.workflowId && { workflowId: c.workflowId }),
-      ...(c.knowledgeId && { knowledgeId: c.knowledgeId }),
-      ...(c.tableId && { tableId: c.tableId }),
-      ...(c.fileId && { fileId: c.fileId }),
-    }))
-  }
-
-  return mapped
-}
 
 const logger = createLogger('useChat')
 
@@ -524,7 +407,7 @@ export function useChat(
 
     const activeStreamId = chatHistory.activeStreamId
     appliedChatIdRef.current = chatHistory.id
-    const mappedMessages = chatHistory.messages.map(mapStoredMessage)
+    const mappedMessages = chatHistory.messages.map(toDisplayMessage)
     const shouldPreserveActiveStreamingMessage =
       sendingRef.current && Boolean(activeStreamId) && activeStreamId === streamIdRef.current
 
@@ -777,6 +660,7 @@ export function useChat(
                             id: userMsg.id,
                             role: 'user',
                             content: userMsg.content,
+                            timestamp: new Date().toISOString(),
                           },
                         ],
                         activeStreamId,
@@ -1258,7 +1142,7 @@ export function useChat(
 
     const content = streamingContentRef.current
 
-    const storedBlocks: TaskStoredContentBlock[] = streamingBlocksRef.current.map((block) => {
+    const storedBlocks = streamingBlocksRef.current.map((block) => {
       if (block.type === 'tool_call' && block.toolCall) {
         const isCancelled =
           block.toolCall.status === 'executing' || block.toolCall.status === 'cancelled'
@@ -1282,7 +1166,7 @@ export function useChat(
     })
 
     if (storedBlocks.length > 0) {
-      storedBlocks.push({ type: 'stopped' })
+      storedBlocks.push({ type: 'stopped', content: undefined })
     }
 
     try {
@@ -1379,7 +1263,7 @@ export function useChat(
       streamIdRef.current = userMessageId
       lastCursorRef.current = '0'
 
-      const storedAttachments: TaskStoredFileAttachment[] | undefined =
+      const storedAttachments: PersistedFileAttachment[] | undefined =
         fileAttachments && fileAttachments.length > 0
           ? fileAttachments.map((f) => ({
               id: f.id,
@@ -1392,10 +1276,11 @@ export function useChat(
 
       const requestChatId = selectedChatIdRef.current ?? chatIdRef.current
       if (requestChatId) {
-        const cachedUserMsg: TaskStoredMessage = {
+        const cachedUserMsg: PersistedMessage = {
           id: userMessageId,
           role: 'user' as const,
           content: message,
+          timestamp: new Date().toISOString(),
           ...(storedAttachments && { fileAttachments: storedAttachments }),
         }
         queryClient.setQueryData<TaskChatHistory>(taskKeys.detail(requestChatId), (old) => {
@@ -1409,7 +1294,15 @@ export function useChat(
         })
       }
 
-      const userAttachments = storedAttachments?.map(toDisplayAttachment)
+      const userAttachments = storedAttachments?.map((f) => ({
+        id: f.id,
+        filename: f.filename,
+        media_type: f.media_type,
+        size: f.size,
+        previewUrl: f.media_type.startsWith('image/')
+          ? `/api/files/serve/${encodeURIComponent(f.key)}?context=mothership`
+          : undefined,
+      }))
 
       const messageContexts = contexts?.map((c) => ({
         kind: c.kind,
