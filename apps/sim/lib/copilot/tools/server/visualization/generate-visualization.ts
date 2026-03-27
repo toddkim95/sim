@@ -1,5 +1,4 @@
 import { createLogger } from '@sim/logger'
-import { appendCopilotLogContext } from '@/lib/copilot/logging'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
@@ -66,7 +65,8 @@ async function collectSandboxFiles(
   inputTables?: string[],
   messageId?: string
 ): Promise<SandboxFile[]> {
-  const withMessageId = (message: string) => appendCopilotLogContext(message, { messageId })
+  const withMessageId = (message: string) =>
+    messageId ? `${message} [messageId:${messageId}]` : message
   const sandboxFiles: SandboxFile[] = []
   let totalSize = 0
 
@@ -158,7 +158,7 @@ export const generateVisualizationServerTool: BaseServerTool<
     context?: ServerToolContext
   ): Promise<VisualizationResult> {
     const withMessageId = (message: string) =>
-      appendCopilotLogContext(message, { messageId: context?.messageId })
+      context?.messageId ? `${message} [messageId:${context.messageId}]` : message
 
     if (!context?.userId) {
       throw new Error('Authentication required')

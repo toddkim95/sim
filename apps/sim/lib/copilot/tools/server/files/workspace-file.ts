@@ -1,5 +1,4 @@
 import { createLogger } from '@sim/logger'
-import { appendCopilotLogContext } from '@/lib/copilot/logging'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
@@ -52,7 +51,7 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
     context?: ServerToolContext
   ): Promise<WorkspaceFileResult> {
     const withMessageId = (message: string) =>
-      appendCopilotLogContext(message, { messageId: context?.messageId })
+      context?.messageId ? `${message} [messageId:${context.messageId}]` : message
 
     if (!context?.userId) {
       logger.error(withMessageId('Unauthorized attempt to access workspace files'))

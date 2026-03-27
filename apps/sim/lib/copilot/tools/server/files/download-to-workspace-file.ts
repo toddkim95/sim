@@ -1,6 +1,5 @@
 import { createLogger } from '@sim/logger'
 import { z } from 'zod'
-import { appendCopilotLogContext } from '@/lib/copilot/logging'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
@@ -126,7 +125,7 @@ export const downloadToWorkspaceFileServerTool: BaseServerTool<
     context?: ServerToolContext
   ): Promise<DownloadToWorkspaceFileResult> {
     const withMessageId = (message: string) =>
-      appendCopilotLogContext(message, { messageId: context?.messageId })
+      context?.messageId ? `${message} [messageId:${context.messageId}]` : message
 
     if (!context?.userId) {
       throw new Error('Authentication required')

@@ -9,7 +9,7 @@ import {
   createInternalServerErrorResponse,
   createRequestTracker,
   createUnauthorizedResponse,
-} from '@/lib/copilot/request-helpers'
+} from '@/lib/copilot/request/http'
 
 const logger = createLogger('CopilotFeedbackAPI')
 

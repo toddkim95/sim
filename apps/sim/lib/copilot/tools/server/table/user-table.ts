@@ -1,5 +1,4 @@
 import { createLogger } from '@sim/logger'
-import { appendCopilotLogContext } from '@/lib/copilot/logging'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
@@ -243,7 +242,7 @@ export const userTableServerTool: BaseServerTool<UserTableArgs, UserTableResult>
   name: 'user_table',
   async execute(params: UserTableArgs, context?: ServerToolContext): Promise<UserTableResult> {
     const withMessageId = (message: string) =>
-      appendCopilotLogContext(message, { messageId: context?.messageId })
+      context?.messageId ? `${message} [messageId:${context.messageId}]` : message
 
     if (!context?.userId) {
       logger.error(

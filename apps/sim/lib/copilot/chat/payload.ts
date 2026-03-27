@@ -1,7 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { getUserSubscriptionState } from '@/lib/billing/core/subscription'
-import { appendCopilotLogContext } from '@/lib/copilot/logging'
-import { getCopilotToolDescription } from '@/lib/copilot/tool-descriptions'
+import { getCopilotToolDescription } from '@/lib/copilot/tools/descriptions'
 import { isHosted } from '@/lib/core/config/feature-flags'
 import { createMcpToolId } from '@/lib/mcp/utils'
 import { trackChatUpload } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
@@ -11,7 +10,7 @@ import { getLatestVersionTools, stripVersionSuffix } from '@/tools/utils'
 
 const logger = createLogger('CopilotChatPayload')
 
-export interface BuildPayloadParams {
+interface BuildPayloadParams {
   message: string
   workflowId?: string
   workflowName?: string
@@ -61,9 +60,9 @@ export async function buildIntegrationToolSchemas(
       shouldAppendEmailTagline = subscriptionState.isFree
     } catch (error) {
       logger.warn(
-        appendCopilotLogContext('Failed to load subscription state for copilot tool descriptions', {
-          messageId,
-        }),
+        messageId
+          ? `Failed to load subscription state for copilot tool descriptions [messageId:${messageId}]`
+          : 'Failed to load subscription state for copilot tool descriptions',
         {
           userId,
           error: error instanceof Error ? error.message : String(error),
@@ -93,7 +92,9 @@ export async function buildIntegrationToolSchemas(
         })
       } catch (toolError) {
         logger.warn(
-          appendCopilotLogContext('Failed to build schema for tool, skipping', { messageId }),
+          messageId
+            ? `Failed to build schema for tool, skipping [messageId:${messageId}]`
+            : 'Failed to build schema for tool, skipping',
           {
             toolId,
             error: toolError instanceof Error ? toolError.message : String(toolError),
@@ -102,9 +103,14 @@ export async function buildIntegrationToolSchemas(
       }
     }
   } catch (error) {
-    logger.warn(appendCopilotLogContext('Failed to build tool schemas', { messageId }), {
-      error: error instanceof Error ? error.message : String(error),
-    })
+    logger.warn(
+      messageId
+        ? `Failed to build tool schemas [messageId:${messageId}]`
+        : 'Failed to build tool schemas',
+      {
+        error: error instanceof Error ? error.message : String(error),
+      }
+    )
   }
   return integrationTools
 }
@@ -202,18 +208,18 @@ export async function buildCopilotRequestPayload(
           }
           if (mcpTools.length > 0) {
             logger.error(
-              appendCopilotLogContext('Added MCP tools to copilot payload', {
-                messageId: userMessageId,
-              }),
+              userMessageId
+                ? `Added MCP tools to copilot payload [messageId:${userMessageId}]`
+                : 'Added MCP tools to copilot payload',
               { count: mcpTools.length }
             )
           }
         }
       } catch (error) {
         logger.warn(
-          appendCopilotLogContext('Failed to discover MCP tools for copilot', {
-            messageId: userMessageId,
-          }),
+          userMessageId
+            ? `Failed to discover MCP tools for copilot [messageId:${userMessageId}]`
+            : 'Failed to discover MCP tools for copilot',
           {
             error: error instanceof Error ? error.message : String(error),
           }

@@ -4,16 +4,16 @@ import {
   beginThinkingBlock,
   finalizeThinkingBlock,
 } from '@/lib/copilot/client-sse/content-blocks'
+import type { LegacyStreamEvent as SSEEvent } from '@/lib/copilot/client-sse/legacy-types'
 import { STREAM_STORAGE_KEY } from '@/lib/copilot/constants'
 import { EditWorkflow, OauthRequestAccess } from '@/lib/copilot/generated/tool-catalog-v1'
-import type { LegacyStreamEvent as SSEEvent } from '@/lib/copilot/legacy-stream-events'
 import { asRecord } from '@/lib/copilot/request/sse-utils'
 import {
   isBackgroundState,
   isRejectedState,
   isReviewState,
   resolveToolDisplay,
-} from '@/lib/copilot/store-utils'
+} from '@/lib/copilot/tools/client/store-utils'
 import { ClientToolCallState } from '@/lib/copilot/tools/client/tool-display-registry'
 import type { CopilotStore, CopilotStreamInfo, CopilotToolCall } from '@/stores/panel/copilot/types'
 import { useVariablesStore } from '@/stores/panel/variables/store'

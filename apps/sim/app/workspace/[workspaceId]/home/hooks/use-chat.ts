@@ -11,11 +11,31 @@ import {
 import { COPILOT_CHAT_API_PATH, MOTHERSHIP_CHAT_API_PATH } from '@/lib/copilot/constants'
 import type { MothershipStreamV1EventEnvelope } from '@/lib/copilot/generated/mothership-stream-v1'
 import {
+  MothershipStreamV1EventType,
+  MothershipStreamV1ResourceOp,
+  MothershipStreamV1RunKind,
+  MothershipStreamV1SessionKind,
+  MothershipStreamV1SpanLifecycleEvent,
+  MothershipStreamV1SpanPayloadKind,
+  MothershipStreamV1ToolOutcome,
+  MothershipStreamV1ToolPhase,
+} from '@/lib/copilot/generated/mothership-stream-v1'
+import {
+  DeployApi,
+  DeployChat,
+  DeployMcp,
+  FileWrite,
+  Read as ReadTool,
+  Redeploy,
+  ToolSearchToolRegex,
+  WorkspaceFile,
+} from '@/lib/copilot/generated/tool-catalog-v1'
+import {
   extractResourcesFromToolResult,
   isResourceToolName,
-} from '@/lib/copilot/resource-extraction'
-import { VFS_DIR_TO_RESOURCE } from '@/lib/copilot/resource-types'
-import { isWorkflowToolName } from '@/lib/copilot/workflow-tools'
+} from '@/lib/copilot/resources/extraction'
+import { VFS_DIR_TO_RESOURCE } from '@/lib/copilot/resources/types'
+import { isWorkflowToolName } from '@/lib/copilot/tools/workflow-tools'
 import { getNextWorkflowColor } from '@/lib/workflows/colors'
 import { invalidateResourceQueries } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-registry'
 import { deploymentKeys } from '@/hooks/queries/deployments'
@@ -74,14 +94,19 @@ export interface UseChatReturn {
 }
 
 const STATE_TO_STATUS: Record<string, ToolCallStatus> = {
-  success: 'success',
-  error: 'error',
-  cancelled: 'cancelled',
-  rejected: 'error',
-  skipped: 'success',
+  [MothershipStreamV1ToolOutcome.success]: 'success',
+  [MothershipStreamV1ToolOutcome.error]: 'error',
+  [MothershipStreamV1ToolOutcome.cancelled]: 'cancelled',
+  [MothershipStreamV1ToolOutcome.rejected]: 'error',
+  [MothershipStreamV1ToolOutcome.skipped]: 'success',
 } as const
 
-const DEPLOY_TOOL_NAMES = new Set(['deploy_api', 'deploy_chat', 'deploy_mcp', 'redeploy'])
+const DEPLOY_TOOL_NAMES: Set<string> = new Set([
+  DeployApi.id,
+  DeployChat.id,
+  DeployMcp.id,
+  Redeploy.id,
+])
 const RECONNECT_TAIL_ERROR =
   'Live reconnect failed before the stream finished. The latest response may be incomplete.'
 
@@ -717,7 +742,7 @@ export function useChat(
 
             logger.debug('SSE event received', parsed)
             switch (parsed.type) {
-              case 'session': {
+              case MothershipStreamV1EventType.session: {
                 const payload = getPayloadData(parsed)
                 const kind = typeof payload.kind === 'string' ? payload.kind : ''
                 const payloadChatId =
@@ -726,7 +751,7 @@ export function useChat(
                     : typeof parsed.stream?.chatId === 'string'
                       ? parsed.stream.chatId
                       : undefined
-                if (kind === 'chat' && payloadChatId) {
+                if (kind === MothershipStreamV1SessionKind.chat && payloadChatId) {
                   const isNewChat = !chatIdRef.current
                   chatIdRef.current = payloadChatId
                   const selected = selectedChatIdRef.current
@@ -767,7 +792,7 @@ export function useChat(
                     }
                   }
                 }
-                if (kind === 'title') {
+                if (kind === MothershipStreamV1SessionKind.title) {
                   queryClient.invalidateQueries({
                     queryKey: taskKeys.list(workspaceId),
                   })
@@ -775,7 +800,7 @@ export function useChat(
                 }
                 break
               }
-              case 'text': {
+              case MothershipStreamV1EventType.text: {
                 const payload = getPayloadData(parsed)
                 const chunk = typeof payload.text === 'string' ? payload.text : ''
                 if (chunk) {
@@ -796,9 +821,12 @@ export function useChat(
                 }
                 break
               }
-              case 'tool': {
+              case MothershipStreamV1EventType.tool: {
                 const payload = getPayloadData(parsed)
-                const phase = typeof payload.phase === 'string' ? payload.phase : 'call'
+                const phase =
+                  typeof payload.phase === 'string'
+                    ? payload.phase
+                    : MothershipStreamV1ToolPhase.call
                 const id =
                   typeof payload.toolCallId === 'string'
                     ? payload.toolCallId
@@ -807,7 +835,7 @@ export function useChat(
                       : undefined
                 if (!id) break
 
-                if (phase === 'args_delta') {
+                if (phase === MothershipStreamV1ToolPhase.args_delta) {
                   const delta =
                     typeof payload.argumentsDelta === 'string' ? payload.argumentsDelta : ''
                   if (!delta) break
@@ -817,7 +845,7 @@ export function useChat(
                       ? payload.toolName
                       : (blocks[toolMap.get(id) ?? -1]?.toolCall?.name ?? '')
                   const streamWorkspaceFile =
-                    activeSubagent === 'file_write' || toolName === 'workspace_file'
+                    activeSubagent === FileWrite.id || toolName === WorkspaceFile.id
 
                   if (streamWorkspaceFile) {
                     let prev = streamingFileRef.current
@@ -880,7 +908,7 @@ export function useChat(
                   break
                 }
 
-                if (phase === 'result') {
+                if (phase === MothershipStreamV1ToolPhase.result) {
                   const idx = toolMap.get(id)
                   if (idx === undefined || !blocks[idx].toolCall) {
                     break
@@ -890,13 +918,13 @@ export function useChat(
                   const success =
                     typeof payload.success === 'boolean'
                       ? payload.success
-                      : payload.status === 'success'
+                      : payload.status === MothershipStreamV1ToolOutcome.success
                   const isCancelled =
                     resultObj?.reason === 'user_cancelled' ||
                     resultObj?.cancelledByUser === true ||
                     payload.reason === 'user_cancelled' ||
                     payload.cancelledByUser === true ||
-                    payload.status === 'cancelled'
+                    payload.status === MothershipStreamV1ToolOutcome.cancelled
 
                   if (isCancelled) {
                     tc.status = 'cancelled'
@@ -917,7 +945,7 @@ export function useChat(
                   }
                   flush()
 
-                  if (tc.name === 'read' && tc.status === 'success') {
+                  if (tc.name === ReadTool.id && tc.status === 'success') {
                     const readArgs = toolArgsMap.get(id)
                     const resource = extractResourceFromReadResult(
                       readArgs?.path as string | undefined,
@@ -970,7 +998,7 @@ export function useChat(
 
                   onToolResultRef.current?.(tc.name, tc.status === 'success', tc.result?.output)
 
-                  if (tc.name === 'workspace_file') {
+                  if (tc.name === WorkspaceFile.id) {
                     setStreamingFile(null)
                     streamingFileRef.current = null
 
@@ -989,7 +1017,7 @@ export function useChat(
                     }
                   }
 
-                  if (tc.status === 'error' && tc.name === 'workspace_file') {
+                  if (tc.status === 'error' && tc.name === WorkspaceFile.id) {
                     setStreamingFile(null)
                     streamingFileRef.current = null
                     setResources((rs) => rs.filter((resource) => resource.id !== 'streaming-file'))
@@ -1004,7 +1032,7 @@ export function useChat(
                       ? payload.name
                       : 'unknown'
                 const isPartial = payload.partial === true
-                if (name === 'tool_search_tool_regex') {
+                if (name === ToolSearchToolRegex.id) {
                   break
                 }
                 const ui = getToolUI(payload)
@@ -1028,7 +1056,7 @@ export function useChat(
                       calledBy: activeSubagent,
                     },
                   })
-                  if (name === 'read' || isResourceToolName(name)) {
+                  if (name === ReadTool.id || isResourceToolName(name)) {
                     if (args) toolArgsMap.set(id, args)
                   }
                 } else {
@@ -1071,7 +1099,7 @@ export function useChat(
                 }
                 break
               }
-              case 'resource': {
+              case MothershipStreamV1EventType.resource: {
                 const payload = getPayloadData(parsed)
                 const resource = asPayloadRecord(payload.resource)
                 if (
@@ -1082,7 +1110,7 @@ export function useChat(
                   break
                 }
 
-                if (payload.op === 'remove') {
+                if (payload.op === MothershipStreamV1ResourceOp.remove) {
                   removeResource(resource.type as MothershipResourceType, resource.id)
                   invalidateResourceQueries(
                     queryClient,
@@ -1126,10 +1154,10 @@ export function useChat(
                 }
                 break
               }
-              case 'run': {
+              case MothershipStreamV1EventType.run: {
                 const payload = getPayloadData(parsed)
                 const kind = typeof payload.kind === 'string' ? payload.kind : ''
-                if (kind === 'compaction_start') {
+                if (kind === MothershipStreamV1RunKind.compaction_start) {
                   const compactionId = `compaction_${Date.now()}`
                   activeCompactionId = compactionId
                   toolMap.set(compactionId, blocks.length)
@@ -1143,7 +1171,7 @@ export function useChat(
                     },
                   })
                   flush()
-                } else if (kind === 'compaction_done') {
+                } else if (kind === MothershipStreamV1RunKind.compaction_done) {
                   const compactionId = activeCompactionId || `compaction_${Date.now()}`
                   activeCompactionId = undefined
                   const idx = toolMap.get(compactionId)
@@ -1166,10 +1194,10 @@ export function useChat(
                 }
                 break
               }
-              case 'span': {
+              case MothershipStreamV1EventType.span: {
                 const payload = getPayloadData(parsed)
                 const kind = typeof payload.kind === 'string' ? payload.kind : ''
-                if (kind !== 'subagent') {
+                if (kind !== MothershipStreamV1SpanPayloadKind.subagent) {
                   break
                 }
                 const spanEvent = typeof payload.event === 'string' ? payload.event : ''
@@ -1179,23 +1207,23 @@ export function useChat(
                     : typeof parsed.scope?.agentId === 'string'
                       ? parsed.scope.agentId
                       : undefined
-                if (spanEvent === 'start' && name) {
+                if (spanEvent === MothershipStreamV1SpanLifecycleEvent.start && name) {
                   activeSubagent = name
                   blocks.push({ type: 'subagent', content: name })
-                  if (name === 'file_write') {
+                  if (name === FileWrite.id) {
                     const emptyFile = { fileName: '', content: '' }
                     streamingFileRef.current = emptyFile
                     setStreamingFile(emptyFile)
                   }
                   flush()
-                } else if (spanEvent === 'end') {
+                } else if (spanEvent === MothershipStreamV1SpanLifecycleEvent.end) {
                   activeSubagent = undefined
                   blocks.push({ type: 'subagent_end' })
                   flush()
                 }
                 break
               }
-              case 'error': {
+              case MothershipStreamV1EventType.error: {
                 const payload = getPayloadData(parsed)
                 sawStreamError = true
                 setError(
@@ -1206,7 +1234,7 @@ export function useChat(
                 appendInlineErrorTag(buildInlineErrorTag(parsed))
                 break
               }
-              case 'complete': {
+              case MothershipStreamV1EventType.complete: {
                 break
               }
             }
@@ -1240,7 +1268,7 @@ export function useChat(
           toolCall: {
             id: block.toolCall.id,
             name: block.toolCall.name,
-            state: isCancelled ? 'cancelled' : block.toolCall.status,
+            state: isCancelled ? MothershipStreamV1ToolOutcome.cancelled : block.toolCall.status,
             params: block.toolCall.params,
             result: block.toolCall.result,
             display: {
