@@ -57,6 +57,7 @@ import type {
   ChatMessage,
   ContentBlock,
   FileAttachmentForApi,
+  GenericResourceData,
   MothershipResource,
   MothershipResourceType,
   QueuedMessage,
@@ -85,6 +86,7 @@ export interface UseChatReturn {
   sendNow: (id: string) => Promise<void>
   editQueuedMessage: (id: string) => QueuedMessage | undefined
   streamingFile: { fileName: string; content: string } | null
+  genericResourceData: GenericResourceData | null
 }
 
 const DEPLOY_TOOL_NAMES: Set<string> = new Set([
@@ -236,6 +238,7 @@ export function useChat(
   const [resolvedChatId, setResolvedChatId] = useState<string | undefined>(initialChatId)
   const [resources, setResources] = useState<MothershipResource[]>([])
   const [activeResourceId, setActiveResourceId] = useState<string | null>(null)
+  const [genericResourceData, setGenericResourceData] = useState<GenericResourceData | null>(null)
   const onResourceEventRef = useRef(options?.onResourceEvent)
   onResourceEventRef.current = options?.onResourceEvent
   const apiPathRef = useRef(options?.apiPath ?? MOTHERSHIP_CHAT_API_PATH)
@@ -1538,5 +1541,6 @@ export function useChat(
     sendNow,
     editQueuedMessage,
     streamingFile,
+    genericResourceData,
   }
 }
