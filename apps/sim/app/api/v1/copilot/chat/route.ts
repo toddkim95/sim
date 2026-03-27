@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { appendCopilotLogContext } from '@/lib/copilot/logging'
 import { COPILOT_REQUEST_MODES } from '@/lib/copilot/models'
-import { orchestrateCopilotStream } from '@/lib/copilot/orchestrator'
+import { runCopilotLifecycle } from '@/lib/copilot/request/lifecycle/continue'
 import { getWorkflowById, resolveWorkflowIdForUser } from '@/lib/workflows/utils'
 import { authenticateV1Request } from '@/app/api/v1/auth'
 
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
       chatId,
     }
 
-    const result = await orchestrateCopilotStream(requestPayload, {
+    const result = await runCopilotLifecycle(requestPayload, {
       userId: auth.userId,
       workflowId: resolved.workflowId,
       chatId,

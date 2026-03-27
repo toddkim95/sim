@@ -5,8 +5,9 @@ import {
   finalizeThinkingBlock,
 } from '@/lib/copilot/client-sse/content-blocks'
 import { STREAM_STORAGE_KEY } from '@/lib/copilot/constants'
+import { EditWorkflow, OauthRequestAccess } from '@/lib/copilot/generated/tool-catalog-v1'
 import type { LegacyStreamEvent as SSEEvent } from '@/lib/copilot/legacy-stream-events'
-import { asRecord } from '@/lib/copilot/orchestrator/sse/utils'
+import { asRecord } from '@/lib/copilot/request/sse-utils'
 import {
   isBackgroundState,
   isRejectedState,
@@ -21,6 +22,7 @@ import { useWorkflowDiffStore } from '@/stores/workflow-diff/store'
 import { captureBaselineSnapshot } from '@/stores/workflow-diff/utils'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import type { WorkflowState } from '@/stores/workflows/workflow/types'
+import { executeRunToolOnClient } from './run-tool-execution'
 import type { ClientContentBlock, ClientStreamingContext } from './types'
 
 const logger = createLogger('CopilotClientSseHandlers')
@@ -604,7 +606,7 @@ export const sseHandlers: Record<string, SSEHandler> = {
           }
         }
 
-        if (current.name === 'edit_workflow') {
+        if (current.name === EditWorkflow.id) {
           try {
             const resultPayload = asRecord(
               data?.result || eventData.result || eventData.data || data?.data
@@ -987,7 +989,11 @@ export const sseHandlers: Record<string, SSEHandler> = {
       return
     }
 
-    if (toolName === 'oauth_request_access' && args && typeof window !== 'undefined') {
+    if (clientExecutable && initialState === ClientToolCallState.executing) {
+      executeRunToolOnClient(id, toolName, args || existing?.params || {})
+    }
+
+    if (toolName === OauthRequestAccess.id && args && typeof window !== 'undefined') {
       try {
         window.dispatchEvent(
           new CustomEvent('open-oauth-connect', {
