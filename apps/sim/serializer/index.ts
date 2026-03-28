@@ -347,14 +347,17 @@ export class Serializer {
           )
         )
 
-      const isOrphanWithValue =
-        matchingConfigs.length === 0 && subBlock.value != null && subBlock.value !== ''
+      const isImpersonateUserEmailOrphanWithValue =
+        id === 'impersonateUserEmail' &&
+        matchingConfigs.length === 0 &&
+        subBlock.value != null &&
+        subBlock.value !== ''
 
       if (
         (matchingConfigs.length > 0 && shouldInclude) ||
         hasStarterInputFormatValues ||
         isLegacyAgentField ||
-        isOrphanWithValue
+        isImpersonateUserEmailOrphanWithValue
       ) {
         params[id] = subBlock.value
       }

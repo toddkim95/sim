@@ -10,7 +10,6 @@ import { getPollingProviderFromOAuth } from '@/lib/credential-sets/providers'
 import {
   getCanonicalScopesForProvider,
   getProviderIdFromServiceId,
-  getServiceAccountProviderForProviderId,
   OAUTH_PROVIDERS,
   type OAuthProvider,
   parseProvider,
@@ -120,11 +119,6 @@ export function CredentialSelector({
   const isServiceAccount = useMemo(
     () => selectedCredential?.provider?.endsWith('-service-account') ?? false,
     [selectedCredential]
-  )
-
-  const supportsServiceAccount = useMemo(
-    () => !!getServiceAccountProviderForProviderId(effectiveProviderId),
-    [effectiveProviderId]
   )
 
   const selectedCredentialSet = useMemo(
@@ -377,7 +371,7 @@ export function CredentialSelector({
         className={overlayContent ? 'pl-7' : ''}
       />
 
-      {supportsServiceAccount && !isPreview && (
+      {isServiceAccount && !isPreview && (
         <div className='mt-2.5 flex flex-col gap-2.5'>
           <div className='flex items-center gap-1.5 pl-0.5'>
             <Label>
